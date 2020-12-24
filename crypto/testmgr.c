@@ -431,7 +431,7 @@ static int __test_aead(struct crypto_aead *tfm, int enc,
 	struct scatterlist *sgout;
 	const char *e, *d;
 	struct tcrypt_result result;
-	unsigned int authsize, iv_len;
+	unsigned int authsize;
 	void *input;
 	void *output;
 	void *assoc;
@@ -504,11 +504,10 @@ static int __test_aead(struct crypto_aead *tfm, int enc,
 
 		memcpy(input, template[i].input, template[i].ilen);
 		memcpy(assoc, template[i].assoc, template[i].alen);
-		iv_len = crypto_aead_ivsize(tfm);
 		if (template[i].iv)
-			memcpy(iv, template[i].iv, iv_len);
+			memcpy(iv, template[i].iv, MAX_IVLEN);
 		else
-			memset(iv, 0, iv_len);
+			memset(iv, 0, MAX_IVLEN);
 
 		crypto_aead_clear_flags(tfm, ~0);
 		if (template[i].wk)
