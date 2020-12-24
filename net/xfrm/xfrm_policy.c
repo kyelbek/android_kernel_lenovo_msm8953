@@ -939,10 +939,8 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 	write_lock_bh(&net->xfrm.xfrm_policy_lock);
 
 	err = xfrm_policy_flush_secctx_check(net, type, task_valid);
-	if (err) {
-		pr_err("kp log: failed @ xfrm_policy_flush_secctx_check with err [%d]\n", err);
+	if (err)
 		goto out;
-	}
 
 	for (dir = 0; dir < XFRM_POLICY_MAX; dir++) {
 		struct xfrm_policy *pol;
@@ -985,10 +983,8 @@ int xfrm_policy_flush(struct net *net, u8 type, bool task_valid)
 		}
 
 	}
-	if (!cnt) {
-		pr_err("kp log: cnt not set\n");
+	if (!cnt)
 		err = -ESRCH;
-	}
 out:
 	write_unlock_bh(&net->xfrm.xfrm_policy_lock);
 	return err;
@@ -1219,15 +1215,9 @@ static struct xfrm_policy *xfrm_sk_policy_lookup(struct sock *sk, int dir,
 
 	read_lock_bh(&net->xfrm.xfrm_policy_lock);
 	if ((pol = sk->sk_policy[dir]) != NULL) {
-		bool match;
+		bool match = xfrm_selector_match(&pol->selector, fl, family);
 		int err = 0;
 
-		if (pol->family != family) {
-			pol = NULL;
-			goto out;
-		}
-
-		match = xfrm_selector_match(&pol->selector, fl, family);
 		if (match) {
 			if ((sk->sk_mark & pol->mark.m) != pol->mark.v) {
 				pol = NULL;

@@ -111,14 +111,14 @@
 struct rcar_msi {
 	DECLARE_BITMAP(used, INT_PCI_MSI_NR);
 	struct irq_domain *domain;
-	struct msi_controller chip;
+	struct msi_chip chip;
 	unsigned long pages;
 	struct mutex lock;
 	int irq1;
 	int irq2;
 };
 
-static inline struct rcar_msi *to_rcar_msi(struct msi_controller *chip)
+static inline struct rcar_msi *to_rcar_msi(struct msi_chip *chip)
 {
 	return container_of(chip, struct rcar_msi, chip);
 }
@@ -380,10 +380,20 @@ static int rcar_pcie_setup(int nr, struct pci_sys_data *sys)
 	return 1;
 }
 
+static void rcar_pcie_add_bus(struct pci_bus *bus)
+{
+	if (IS_ENABLED(CONFIG_PCI_MSI)) {
+		struct rcar_pcie *pcie = sys_to_pcie(bus->sysdata);
+
+		bus->msi = &pcie->msi.chip;
+	}
+}
+
 struct hw_pci rcar_pci = {
 	.setup          = rcar_pcie_setup,
 	.map_irq        = of_irq_parse_and_map_pci,
 	.ops            = &rcar_pcie_ops,
+	.add_bus        = rcar_pcie_add_bus,
 };
 
 static void rcar_pcie_enable(struct rcar_pcie *pcie)
@@ -392,9 +402,6 @@ static void rcar_pcie_enable(struct rcar_pcie *pcie)
 
 	rcar_pci.nr_controllers = 1;
 	rcar_pci.private_data = (void **)&pcie;
-#ifdef CONFIG_PCI_MSI
-	rcar_pci.msi_ctrl = &pcie->msi.chip;
-#endif
 
 	pci_common_init_dev(&pdev->dev, &rcar_pci);
 #ifdef CONFIG_PCI_DOMAINS
@@ -615,7 +622,7 @@ static irqreturn_t rcar_pcie_msi_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int rcar_msi_setup_irq(struct msi_controller *chip, struct pci_dev *pdev,
+static int rcar_msi_setup_irq(struct msi_chip *chip, struct pci_dev *pdev,
 			      struct msi_desc *desc)
 {
 	struct rcar_msi *msi = to_rcar_msi(chip);
@@ -640,12 +647,12 @@ static int rcar_msi_setup_irq(struct msi_controller *chip, struct pci_dev *pdev,
 	msg.address_hi = rcar_pci_read_reg(pcie, PCIEMSIAUR);
 	msg.data = hwirq;
 
-	pci_write_msi_msg(irq, &msg);
+	write_msi_msg(irq, &msg);
 
 	return 0;
 }
 
-static void rcar_msi_teardown_irq(struct msi_controller *chip, unsigned int irq)
+static void rcar_msi_teardown_irq(struct msi_chip *chip, unsigned int irq)
 {
 	struct rcar_msi *msi = to_rcar_msi(chip);
 	struct irq_data *d = irq_get_irq_data(irq);
@@ -655,10 +662,10 @@ static void rcar_msi_teardown_irq(struct msi_controller *chip, unsigned int irq)
 
 static struct irq_chip rcar_msi_irq_chip = {
 	.name = "R-Car PCIe MSI",
-	.irq_enable = pci_msi_unmask_irq,
-	.irq_disable = pci_msi_mask_irq,
-	.irq_mask = pci_msi_mask_irq,
-	.irq_unmask = pci_msi_unmask_irq,
+	.irq_enable = unmask_msi_irq,
+	.irq_disable = mask_msi_irq,
+	.irq_mask = mask_msi_irq,
+	.irq_unmask = unmask_msi_irq,
 };
 
 static int rcar_msi_map(struct irq_domain *domain, unsigned int irq,
@@ -987,6 +994,7 @@ static int rcar_pcie_probe(struct platform_device *pdev)
 static struct platform_driver rcar_pcie_driver = {
 	.driver = {
 		.name = DRV_NAME,
+		.owner = THIS_MODULE,
 		.of_match_table = rcar_pcie_of_match,
 		.suppress_bind_attrs = true,
 	},

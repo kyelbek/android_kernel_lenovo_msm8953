@@ -36,8 +36,6 @@
 #define USB_VENDOR_GENESYS_LOGIC		0x05e3
 #define HUB_QUIRK_CHECK_PORT_AUTOSUSPEND	0x01
 
-extern int deny_new_usb;
-
 /* Protect struct usb_device->state and ->children members
  * Note: Both are also protected by ->dev.sem, except that ->state can
  * change to USB_STATE_NOTATTACHED even when the semaphore isn't held. */
@@ -49,11 +47,6 @@ static void hub_event(struct work_struct *work);
 
 /* synchronize hub-port add/remove and peering operations */
 DEFINE_MUTEX(usb_port_peer_mutex);
-
-static bool skip_extended_resume_delay = 1;
-module_param(skip_extended_resume_delay, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(skip_extended_resume_delay,
-		"removes extra delay added to finish bus resume");
 
 /* cycle leds on hubs that aren't blinking for attention */
 static bool blinkenlights = 0;
@@ -628,12 +621,6 @@ void usb_kick_hub_wq(struct usb_device *hdev)
 	if (hub)
 		kick_hub_wq(hub);
 }
-
-void usb_flush_hub_wq(void)
-{
-	flush_workqueue(hub_wq);
-}
-EXPORT_SYMBOL(usb_flush_hub_wq);
 
 /*
  * Let the USB core know that a USB 3.0 device has sent a Function Wake Device
@@ -2241,48 +2228,40 @@ static int usb_enumerate_device_otg(struct usb_device *udev)
 			&& udev->parent == udev->bus->root_hub) {
 		struct usb_otg_descriptor	*desc = NULL;
 		struct usb_bus			*bus = udev->bus;
-		unsigned			port1 = udev->portnum;
 
 		/* descriptor may appear anywhere in config */
-		err = __usb_get_extra_descriptor(udev->rawdescriptors[0],
-				le16_to_cpu(udev->config[0].desc.wTotalLength),
-				USB_DT_OTG, (void **) &desc, sizeof(*desc));
-		if (err || !(desc->bmAttributes & USB_OTG_HNP))
-			return 0;
-		dev_info(&udev->dev, "Dual-Role OTG device on %sHNP port\n",
-					(port1 == bus->otg_port) ? "" : "non-");
+		if (__usb_get_extra_descriptor (udev->rawdescriptors[0],
+					le16_to_cpu(udev->config[0].desc.wTotalLength),
+					USB_DT_OTG, (void **) &desc,
+					sizeof(*desc)) == 0) {
+			if (desc->bmAttributes & USB_OTG_HNP) {
+				unsigned		port1 = udev->portnum;
 
-		/* enable HNP before suspend, it's simpler */
-		if (port1 == bus->otg_port) {
-			bus->b_hnp_enable = 1;
-			err = usb_control_msg(udev,
-				usb_sndctrlpipe(udev, 0),
-				USB_REQ_SET_FEATURE, 0,
-				USB_DEVICE_B_HNP_ENABLE,
-				0, NULL, 0,
-				USB_CTRL_SET_TIMEOUT);
-			if (err < 0) {
-				/*
-				 * OTG MESSAGE: report errors here,
-				 * customize to match your product.
-				 */
-				dev_err(&udev->dev, "can't set HNP mode: %d\n",
-									err);
-				bus->b_hnp_enable = 0;
+				dev_info(&udev->dev,
+					"Dual-Role OTG device on %sHNP port\n",
+					(port1 == bus->otg_port)
+						? "" : "non-");
+
+				/* enable HNP before suspend, it's simpler */
+				if (port1 == bus->otg_port)
+					bus->b_hnp_enable = 1;
+				err = usb_control_msg(udev,
+					usb_sndctrlpipe(udev, 0),
+					USB_REQ_SET_FEATURE, 0,
+					bus->b_hnp_enable
+						? USB_DEVICE_B_HNP_ENABLE
+						: USB_DEVICE_A_ALT_HNP_SUPPORT,
+					0, NULL, 0, USB_CTRL_SET_TIMEOUT);
+				if (err < 0) {
+					/* OTG MESSAGE: report errors here,
+					 * customize to match your product.
+					 */
+					dev_info(&udev->dev,
+						"can't set HNP mode: %d\n",
+						err);
+					bus->b_hnp_enable = 0;
+				}
 			}
-		} else if (desc->bLength == sizeof
-				(struct usb_otg_descriptor)) {
-			/* Set a_alt_hnp_support for legacy otg device */
-			err = usb_control_msg(udev,
-				usb_sndctrlpipe(udev, 0),
-				USB_REQ_SET_FEATURE, 0,
-				USB_DEVICE_A_ALT_HNP_SUPPORT,
-				0, NULL, 0,
-				USB_CTRL_SET_TIMEOUT);
-			if (err < 0)
-				dev_err(&udev->dev,
-					"set a_alt_hnp_support failed: %d\n",
-					err);
 		}
 	}
 #endif
@@ -3420,9 +3399,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		/* drive resume for USB_RESUME_TIMEOUT msec */
 		dev_dbg(&udev->dev, "usb %sresume\n",
 				(PMSG_IS_AUTO(msg) ? "auto-" : ""));
-		if (!skip_extended_resume_delay)
-			usleep_range(USB_RESUME_TIMEOUT * 1000,
-					(USB_RESUME_TIMEOUT + 1) * 1000);
+		msleep(USB_RESUME_TIMEOUT);
 
 		/* Virtual root hubs can trigger on GET_PORT_STATUS to
 		 * stop resume signaling.  Then finish the resume
@@ -3431,7 +3408,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 		status = hub_port_status(hub, port1, &portstatus, &portchange);
 
 		/* TRSMRCY = 10 msec */
-		usleep_range(10000, 10500);
+		msleep(10);
 	}
 
  SuspendCleared:
@@ -4425,9 +4402,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
 	for (retries = 0; retries < GET_DESCRIPTOR_TRIES; (++retries, msleep(100))) {
 		bool did_new_scheme = false;
 
-		if (use_new_scheme(udev, retry_counter) &&
-			!((hcd->driver->flags & HCD_RT_OLD_ENUM) &&
-				!hdev->parent)) {
+		if (use_new_scheme(udev, retry_counter)) {
 			struct usb_device_descriptor *buf;
 			int r = 0;
 
@@ -4762,12 +4737,6 @@ static void hub_port_connect(struct usb_hub *hub, int port1, u16 portstatus,
 			goto done;
 		return;
 	}
-
-	if (deny_new_usb) {
-		dev_err(&port_dev->dev, "denied insert of USB device on port %d\n", port1);
-		goto done;
-	}
-
 	if (hub_is_superspeed(hub->hdev))
 		unit_load = 150;
 	else

@@ -23,7 +23,6 @@
 #  define DEBUG
 #endif
 #endif
-#define CREATE_TRACE_POINTS
 
 #include <linux/memblock.h>
 #include <linux/err.h>
@@ -34,15 +33,18 @@
 #include <linux/log2.h>
 #include <linux/cma.h>
 #include <linux/highmem.h>
-#include <linux/delay.h>
-#include <linux/kmemleak.h>
-#include <trace/events/cma.h>
 #include <linux/io.h>
 
-#include "cma.h"
+struct cma {
+	unsigned long	base_pfn;
+	unsigned long	count;
+	unsigned long	*bitmap;
+	unsigned int order_per_bit; /* Order of pages represented by one bit */
+	struct mutex	lock;
+};
 
-struct cma cma_areas[MAX_CMA_AREAS];
-unsigned cma_area_count;
+static struct cma cma_areas[MAX_CMA_AREAS];
+static unsigned cma_area_count;
 static DEFINE_MUTEX(cma_mutex);
 
 phys_addr_t cma_get_base(const struct cma *cma)
@@ -72,6 +74,11 @@ static unsigned long cma_bitmap_aligned_offset(const struct cma *cma,
 {
 	return (cma->base_pfn & ((1UL << align_order) - 1))
 		>> cma->order_per_bit;
+}
+
+static unsigned long cma_bitmap_maxno(struct cma *cma)
+{
+	return cma->count >> cma->order_per_bit;
 }
 
 static unsigned long cma_bitmap_pages_to_bits(const struct cma *cma,
@@ -129,16 +136,6 @@ static int __init cma_activate_area(struct cma *cma)
 	} while (--i);
 
 	mutex_init(&cma->lock);
-
-#ifdef CONFIG_CMA_DEBUGFS
-	INIT_HLIST_HEAD(&cma->mem_head);
-	spin_lock_init(&cma->mem_head_lock);
-#endif
-
-	if (!PageHighMem(pfn_to_page(cma->base_pfn)))
-		kmemleak_free_part(__va(cma->base_pfn << PAGE_SHIFT),
-				cma->count << PAGE_SHIFT);
-
 	return 0;
 
 err:
@@ -348,9 +345,6 @@ int __init cma_declare_contiguous(phys_addr_t base,
 			}
 		}
 
-		if (addr < highmem_start)
-			kmemleak_no_scan(__va(addr));
-
 		/*
 		 * kmemleak scans/reads tracked objects for pointers to other
 		 * objects but this address isn't mapped and accessible
@@ -389,7 +383,6 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 	unsigned long bitmap_maxno, bitmap_no, bitmap_count;
 	struct page *page = NULL;
 	int ret;
-	int retry_after_sleep = 0;
 
 	if (!cma || !cma->count)
 		return NULL;
@@ -400,15 +393,10 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 	if (!count)
 		return NULL;
 
-	trace_cma_alloc_start(count, align);
-
 	mask = cma_bitmap_aligned_mask(cma, align);
 	offset = cma_bitmap_aligned_offset(cma, align);
 	bitmap_maxno = cma_bitmap_maxno(cma);
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
-
-	if (bitmap_count > bitmap_maxno)
-		return NULL;
 
 	for (;;) {
 		mutex_lock(&cma->lock);
@@ -416,24 +404,8 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 				bitmap_maxno, start, bitmap_count, mask,
 				offset);
 		if (bitmap_no >= bitmap_maxno) {
-			if (retry_after_sleep < 2) {
-				start = 0;
-				/*
-				* Page may be momentarily pinned by some other
-				* process which has been scheduled out, eg.
-				* in exit path, during unmap call, or process
-				* fork and so cannot be freed there. Sleep
-				* for 100ms and retry twice to see if it has
-				* been freed later.
-				*/
-				mutex_unlock(&cma->lock);
-				msleep(100);
-				retry_after_sleep++;
-				continue;
-			} else {
-				mutex_unlock(&cma->lock);
-				break;
-			}
+			mutex_unlock(&cma->lock);
+			break;
 		}
 		bitmap_set(cma->bitmap, bitmap_no, bitmap_count);
 		/*
@@ -458,13 +430,9 @@ struct page *cma_alloc(struct cma *cma, size_t count, unsigned int align)
 
 		pr_debug("%s(): memory range at %p is busy, retrying\n",
 			 __func__, pfn_to_page(pfn));
-
-		trace_cma_alloc_busy_retry(pfn, pfn_to_page(pfn), count, align);
 		/* try again with a bit different memory target */
 		start = bitmap_no + mask + 1;
 	}
-
-	trace_cma_alloc(page ? pfn : -1UL, page, count, align);
 
 	pr_debug("%s(): returned %p\n", __func__, page);
 	return page;
@@ -498,7 +466,6 @@ bool cma_release(struct cma *cma, const struct page *pages, unsigned int count)
 
 	free_contig_range(pfn, count);
 	cma_clear_bitmap(cma, pfn, count);
-	trace_cma_release(pfn, pages, count);
 
 	return true;
 }

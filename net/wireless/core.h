@@ -126,7 +126,6 @@ struct cfg80211_internal_bss {
 	struct list_head list;
 	struct list_head hidden_list;
 	struct rb_node rbn;
-	u64 ts_boottime;
 	unsigned long ts;
 	unsigned long refcount;
 	atomic_t hold;
@@ -203,8 +202,7 @@ struct cfg80211_event {
 			const u8 *resp_ie;
 			size_t req_ie_len;
 			size_t resp_ie_len;
-			struct cfg80211_bss *bss;
-			int status; /* -1 = failed; 0..65535 = status code */
+			u16 status;
 		} cr;
 		struct {
 			const u8 *req_ie;
@@ -217,7 +215,6 @@ struct cfg80211_event {
 			const u8 *ie;
 			size_t ie_len;
 			u16 reason;
-			bool locally_generated;
 		} dc;
 		struct {
 			u8 bssid[ETH_ALEN];
@@ -351,7 +348,7 @@ int cfg80211_connect(struct cfg80211_registered_device *rdev,
 void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 			       const u8 *req_ie, size_t req_ie_len,
 			       const u8 *resp_ie, size_t resp_ie_len,
-			       int status, bool wextev,
+			       u16 status, bool wextev,
 			       struct cfg80211_bss *bss);
 void __cfg80211_disconnected(struct net_device *dev, const u8 *ie,
 			     size_t ie_len, u16 reason, bool from_ap);
@@ -447,13 +444,15 @@ int ieee80211_get_ratemask(struct ieee80211_supported_band *sband,
 			   u32 *mask);
 
 int cfg80211_validate_beacon_int(struct cfg80211_registered_device *rdev,
-				 enum nl80211_iftype iftype, u32 beacon_int);
+				 u32 beacon_int);
 
 void cfg80211_update_iface_num(struct cfg80211_registered_device *rdev,
 			       enum nl80211_iftype iftype, int num);
 
 void __cfg80211_leave(struct cfg80211_registered_device *rdev,
 		      struct wireless_dev *wdev);
+void cfg80211_leave(struct cfg80211_registered_device *rdev,
+		    struct wireless_dev *wdev);
 
 void cfg80211_stop_p2p_device(struct cfg80211_registered_device *rdev,
 			      struct wireless_dev *wdev);

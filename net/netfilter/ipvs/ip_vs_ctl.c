@@ -2340,10 +2340,6 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		/* Set timeout values for (tcp tcpfin udp) */
 		ret = ip_vs_set_timeout(net, (struct ip_vs_timeout_user *)arg);
 		goto out_unlock;
-	} else if (!len) {
-		/* No more commands with len == 0 below */
-		ret = -EINVAL;
-		goto out_unlock;
 	}
 
 	usvc_compat = (struct ip_vs_service_user *)arg;
@@ -2413,6 +2409,9 @@ do_ip_vs_set_ctl(struct sock *sk, int cmd, void __user *user, unsigned int len)
 		break;
 	case IP_VS_SO_SET_DELDEST:
 		ret = ip_vs_del_dest(svc, &udest);
+		break;
+	default:
+		ret = -EINVAL;
 	}
 
   out_unlock:
@@ -2771,7 +2770,7 @@ static struct genl_family ip_vs_genl_family = {
 	.hdrsize	= 0,
 	.name		= IPVS_GENL_NAME,
 	.version	= IPVS_GENL_VERSION,
-	.maxattr	= IPVS_CMD_ATTR_MAX,
+	.maxattr	= IPVS_CMD_MAX,
 	.netnsok        = true,         /* Make ipvsadm to work on netns */
 };
 

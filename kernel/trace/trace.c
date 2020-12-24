@@ -41,7 +41,6 @@
 #include <linux/nmi.h>
 #include <linux/fs.h>
 #include <linux/sched/rt.h>
-#include <linux/coresight-stm.h>
 
 #include "trace.h"
 #include "trace_output.h"
@@ -497,11 +496,8 @@ int __trace_puts(unsigned long ip, const char *str, int size)
 	if (entry->buf[size - 1] != '\n') {
 		entry->buf[size] = '\n';
 		entry->buf[size + 1] = '\0';
-		stm_log(OST_ENTITY_TRACE_PRINTK, entry->buf, size + 2);
-	} else {
+	} else
 		entry->buf[size] = '\0';
-		stm_log(OST_ENTITY_TRACE_PRINTK, entry->buf, size + 1);
-	}
 
 	__buffer_unlock_commit(buffer, event);
 	ftrace_trace_stack(buffer, irq_flags, 4, pc);
@@ -542,7 +538,6 @@ int __trace_bputs(unsigned long ip, const char *str)
 	entry = ring_buffer_event_data(event);
 	entry->ip			= ip;
 	entry->str			= str;
-	stm_log(OST_ENTITY_TRACE_PRINTK, entry->str, strlen(entry->str)+1);
 
 	__buffer_unlock_commit(buffer, event);
 	ftrace_trace_stack(buffer, irq_flags, 4, pc);
@@ -819,6 +814,7 @@ static const char *trace_options[] = {
 	"irq-info",
 	"markers",
 	"function-trace",
+	"print-tgid",
 	NULL
 };
 
@@ -1573,7 +1569,7 @@ static void __trace_find_cmdline(int pid, char comm[])
 
 	map = savedcmd->map_pid_to_cmdline[pid];
 	if (map != NO_CMDLINE_MAP)
-		strlcpy(comm, get_saved_cmdlines(map), TASK_COMM_LEN - 1);
+		strcpy(comm, get_saved_cmdlines(map));
 	else
 		strcpy(comm, "<...>");
 }
@@ -2233,7 +2229,6 @@ __trace_array_vprintk(struct ring_buffer *buffer,
 	memcpy(&entry->buf, tbuffer, len);
 	entry->buf[len] = '\0';
 	if (!call_filter_check_discard(call, entry, buffer, event)) {
-		stm_log(OST_ENTITY_TRACE_PRINTK, entry->buf, len + 1);
 		__buffer_unlock_commit(buffer, event);
 		ftrace_trace_stack(buffer, flags, 6, pc);
 	}
@@ -2604,6 +2599,13 @@ static void print_func_help_header(struct trace_buffer *buf, struct seq_file *m)
 	seq_puts(m, "#              | |       |          |         |\n");
 }
 
+static void print_func_help_header_tgid(struct trace_buffer *buf, struct seq_file *m)
+{
+	print_event_info(buf, m);
+	seq_puts(m, "#           TASK-PID    TGID   CPU#      TIMESTAMP  FUNCTION\n");
+	seq_puts(m, "#              | |        |      |          |         |\n");
+}
+
 static void print_func_help_header_irq(struct trace_buffer *buf, struct seq_file *m)
 {
 	print_event_info(buf, m);
@@ -2614,6 +2616,18 @@ static void print_func_help_header_irq(struct trace_buffer *buf, struct seq_file
 	seq_puts(m, "#                            ||| /     delay\n");
 	seq_puts(m, "#           TASK-PID   CPU#  ||||    TIMESTAMP  FUNCTION\n");
 	seq_puts(m, "#              | |       |   ||||       |         |\n");
+}
+
+static void print_func_help_header_irq_tgid(struct trace_buffer *buf, struct seq_file *m)
+{
+	print_event_info(buf, m);
+	seq_puts(m, "#                                      _-----=> irqs-off\n");
+	seq_puts(m, "#                                     / _----=> need-resched\n");
+	seq_puts(m, "#                                    | / _---=> hardirq/softirq\n");
+	seq_puts(m, "#                                    || / _--=> preempt-depth\n");
+	seq_puts(m, "#                                    ||| /     delay\n");
+	seq_puts(m, "#           TASK-PID    TGID   CPU#  ||||    TIMESTAMP  FUNCTION\n");
+	seq_puts(m, "#              | |        |      |   ||||       |         |\n");
 }
 
 void
@@ -2916,10 +2930,15 @@ void trace_default_header(struct seq_file *m)
 	} else {
 		if (!(trace_flags & TRACE_ITER_VERBOSE)) {
 			if (trace_flags & TRACE_ITER_IRQ_INFO)
-				print_func_help_header_irq(iter->trace_buffer,
-								 m);
+				if (trace_flags & TRACE_ITER_TGID)
+					print_func_help_header_irq_tgid(iter->trace_buffer, m);
+				else
+					print_func_help_header_irq(iter->trace_buffer, m);
 			else
-				print_func_help_header(iter->trace_buffer, m);
+				if (trace_flags & TRACE_ITER_TGID)
+					print_func_help_header_tgid(iter->trace_buffer, m);
+				else
+					print_func_help_header(iter->trace_buffer, m);
 		}
 	}
 }
@@ -5080,11 +5099,8 @@ tracing_mark_write(struct file *filp, const char __user *ubuf,
 	if (entry->buf[cnt - 1] != '\n') {
 		entry->buf[cnt] = '\n';
 		entry->buf[cnt + 1] = '\0';
-		stm_log(OST_ENTITY_TRACE_MARKER, entry->buf, cnt + 2);
-	} else {
+	} else
 		entry->buf[cnt] = '\0';
-		stm_log(OST_ENTITY_TRACE_MARKER, entry->buf, cnt + 1);
-	}
 
 	__buffer_unlock_commit(buffer, event);
 
@@ -6573,7 +6589,7 @@ static int instance_rmdir(const char *name)
 	tracing_set_nop(tr);
 	event_trace_del_tracer(tr);
 	ftrace_destroy_function_files(tr);
-	tracefs_remove_recursive(tr->dir);
+	debugfs_remove_recursive(tr->dir);
 	free_trace_buffers(tr);
 
 	free_cpumask_var(tr->tracing_cpumask);
@@ -6631,6 +6647,9 @@ init_tracer_tracefs(struct trace_array *tr, struct dentry *d_tracer)
 
 	trace_create_file("trace_marker", 0220, d_tracer,
 			  tr, &tracing_mark_fops);
+
+	trace_create_file("saved_tgids", 0444, d_tracer,
+			  tr, &tracing_saved_tgids_fops);
 
 	trace_create_file("trace_clock", 0644, d_tracer, tr,
 			  &trace_clock_fops);

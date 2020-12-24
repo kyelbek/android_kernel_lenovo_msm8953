@@ -600,7 +600,7 @@ static struct sk_buff **vxlan_gro_receive(struct sk_buff **head, struct sk_buff 
 
 	skb_gro_pull(skb, sizeof(*eh)); /* pull inner eth header */
 	skb_gro_postpull_rcsum(skb, eh, sizeof(*eh));
-	pp = call_gro_receive(ptype->callbacks.gro_receive, head, skb);
+	pp = ptype->callbacks.gro_receive(head, skb);
 
 out_unlock:
 	rcu_read_unlock();
@@ -1984,7 +1984,7 @@ static void vxlan_cleanup(unsigned long arg)
 				= container_of(p, struct vxlan_fdb, hlist);
 			unsigned long timeout;
 
-			if (f->state & (NUD_PERMANENT | NUD_NOARP))
+			if (f->state & NUD_PERMANENT)
 				continue;
 
 			timeout = f->used + vxlan->age_interval * HZ;
