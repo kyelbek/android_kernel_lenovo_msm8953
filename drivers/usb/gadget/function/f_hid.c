@@ -385,9 +385,8 @@ static int hidg_setup(struct usb_function *f,
 	value	= __le16_to_cpu(ctrl->wValue);
 	length	= __le16_to_cpu(ctrl->wLength);
 
-	VDBG(cdev,
-	     "%s crtl_request : bRequestType:0x%x bRequest:0x%x Value:0x%x\n",
-	     __func__, ctrl->bRequestType, ctrl->bRequest, value);
+	VDBG(cdev, "hid_setup crtl_request : bRequestType:0x%x bRequest:0x%x "
+		"Value:0x%x\n", ctrl->bRequestType, ctrl->bRequest, value);
 
 	switch ((ctrl->bRequestType << 8) | ctrl->bRequest) {
 	case ((USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
@@ -526,7 +525,7 @@ static int hidg_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		}
 		status = usb_ep_enable(hidg->out_ep);
 		if (status < 0) {
-			ERROR(cdev, "Enable IN endpoint FAILED!\n");
+			ERROR(cdev, "Enable OUT endpoint FAILED!\n");
 			goto fail;
 		}
 		hidg->out_ep->driver_data = hidg;

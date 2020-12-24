@@ -228,7 +228,7 @@ static int start_endpoints(struct snd_usb_substream *subs)
 	if (!test_and_set_bit(SUBSTREAM_FLAG_DATA_EP_STARTED, &subs->flags)) {
 		struct snd_usb_endpoint *ep = subs->data_endpoint;
 
-		dev_dbg(&subs->dev->dev, "Starting data EP @%p\n", ep);
+		dev_dbg(&subs->dev->dev, "Starting data EP @%pK\n", ep);
 
 		ep->data_subs = subs;
 		err = snd_usb_endpoint_start(ep);
@@ -257,7 +257,7 @@ static int start_endpoints(struct snd_usb_substream *subs)
 			}
 		}
 
-		dev_dbg(&subs->dev->dev, "Starting sync EP @%p\n", ep);
+		dev_dbg(&subs->dev->dev, "Starting sync EP @%pK\n", ep);
 
 		ep->sync_slave = subs->data_endpoint;
 		err = snd_usb_endpoint_start(ep);
@@ -332,6 +332,7 @@ static int set_sync_ep_implicit_fb_quirk(struct snd_usb_substream *subs,
 	switch (subs->stream->chip->usb_id) {
 	case USB_ID(0x0763, 0x2030): /* M-Audio Fast Track C400 */
 	case USB_ID(0x0763, 0x2031): /* M-Audio Fast Track C600 */
+	case USB_ID(0x22f0, 0x0006): /* Allen&Heath Qu-16 */
 		ep = 0x81;
 		iface = usb_ifnum_to_if(dev, 3);
 
@@ -551,13 +552,13 @@ static int match_endpoint_audioformats(struct snd_usb_substream *subs,
 
 	if (fp->channels < 1) {
 		dev_dbg(&subs->dev->dev,
-			"%s: (fmt @%p) no channels\n", __func__, fp);
+			"%s: (fmt @%pK) no channels\n", __func__, fp);
 		return 0;
 	}
 
 	if (!(fp->formats & pcm_format_to_bits(pcm_format))) {
 		dev_dbg(&subs->dev->dev,
-			"%s: (fmt @%p) no match for format %d\n", __func__,
+			"%s: (fmt @%pK) no match for format %d\n", __func__,
 			fp, pcm_format);
 		return 0;
 	}
@@ -570,7 +571,7 @@ static int match_endpoint_audioformats(struct snd_usb_substream *subs,
 	}
 	if (!score) {
 		dev_dbg(&subs->dev->dev,
-			"%s: (fmt @%p) no match for rate %d\n", __func__,
+			"%s: (fmt @%pK) no match for rate %d\n", __func__,
 			fp, rate);
 		return 0;
 	}
@@ -579,7 +580,7 @@ static int match_endpoint_audioformats(struct snd_usb_substream *subs,
 		score++;
 
 	dev_dbg(&subs->dev->dev,
-		"%s: (fmt @%p) score %d\n", __func__, fp, score);
+		"%s: (fmt @%pK) score %d\n", __func__, fp, score);
 
 	return score;
 }

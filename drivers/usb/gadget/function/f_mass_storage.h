@@ -160,5 +160,6 @@ void fsg_common_set_inquiry_string(struct fsg_common *common, const char *vn,
 void fsg_config_from_params(struct fsg_config *cfg,
 			    const struct fsg_module_parameters *params,
 			    unsigned int fsg_num_buffers);
-
+int fsg_sysfs_update(struct fsg_common *common, struct device *dev,
+				bool create);
 #endif /* USB_F_MASS_STORAGE_H */

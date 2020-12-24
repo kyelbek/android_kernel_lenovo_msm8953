@@ -538,6 +538,8 @@ int snd_usb_mixer_vol_tlv(struct snd_kcontrol *kcontrol, int op_flag,
 
 	if (size < sizeof(scale))
 		return -ENOMEM;
+	if (cval->min_mute)
+		scale[0] = SNDRV_CTL_TLVT_DB_MINMAX_MUTE;
 	scale[2] = cval->dBmin;
 	scale[3] = cval->dBmax;
 	if (copy_to_user(_tlv, scale, sizeof(scale)))
@@ -947,10 +949,9 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 	case USB_ID(0x046d, 0x0826): /* HD Webcam c525 */
 	case USB_ID(0x046d, 0x08ca): /* Logitech Quickcam Fusion */
 	case USB_ID(0x046d, 0x0991):
-	case USB_ID(0x046d, 0x09a2): /* QuickCam Communicate Deluxe/S7500 */
 	/* Most audio usb devices lie about volume resolution.
 	 * Most Logitech webcams have res = 384.
-	 * Probably there is some logitech magic behind this number --fishor
+	 * Proboly there is some logitech magic behind this number --fishor
 	 */
 		if (!strcmp(kctl->id.name, "Mic Capture Volume")) {
 			usb_audio_info(chip,
@@ -965,6 +966,15 @@ static void volume_control_quirks(struct usb_mixer_elem_info *cval,
 			cval->max = 0;
 			cval->res = 1;
 		}
+		break;
+	case USB_ID(0x1130, 0x1620): /* Logitech Speakers S150 */
+	/* This audio device has 2 channels and it explicitly requires the
+	 * host to send SET_CUR command on the volume control of both the
+	 * channels. 7936 = 0x1F00 is the default value.
+	 */
+		if (cval->channels == 2)
+			snd_usb_mixer_set_ctl_value(cval, UAC_SET_CUR,
+						(cval->control << 8) | 2, 7936);
 		break;
 	}
 }
@@ -1063,8 +1073,10 @@ no_res_check:
 	/* USB descriptions contain the dB scale in 1/256 dB unit
 	 * while ALSA TLV contains in 1/100 dB unit
 	 */
-	cval->dBmin = (convert_signed_value(cval, cval->min) * 100) / 256;
-	cval->dBmax = (convert_signed_value(cval, cval->max) * 100) / 256;
+	cval->dBmin =
+		(convert_signed_value(cval, cval->min) * 100) / (cval->res);
+	cval->dBmax =
+		(convert_signed_value(cval, cval->max) * 100) / (cval->res);
 	if (cval->dBmin > cval->dBmax) {
 		/* something is wrong; assume it's either from/to 0dB */
 		if (cval->dBmin < 0)

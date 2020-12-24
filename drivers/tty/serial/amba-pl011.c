@@ -1653,6 +1653,8 @@ static void pl011_shutdown(struct uart_port *port)
 			plat->exit();
 	}
 
+	if (uap->port.ops->flush_buffer)
+		uap->port.ops->flush_buffer(port);
 }
 
 static void

@@ -202,8 +202,15 @@ typedef void (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define WRITE_SYNC		(WRITE | REQ_SYNC | REQ_NOIDLE)
 #define WRITE_ODIRECT		(WRITE | REQ_SYNC)
 #define WRITE_FLUSH		(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FLUSH)
+#define WRITE_FLUSH_BARRIER	(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FLUSH | \
+					REQ_BARRIER)
 #define WRITE_FUA		(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FUA)
 #define WRITE_FLUSH_FUA		(WRITE | REQ_SYNC | REQ_NOIDLE | REQ_FLUSH | REQ_FUA)
+#define WRITE_POST_FLUSH_BARRIER	(WRITE | REQ_SYNC | REQ_NOIDLE | \
+					 REQ_POST_FLUSH_BARRIER | REQ_BARRIER)
+#define WRITE_ORDERED_FLUSH_BARRIER	(WRITE | REQ_SYNC | REQ_NOIDLE | \
+					 REQ_FLUSH | REQ_POST_FLUSH_BARRIER | \
+					 REQ_BARRIER)
 
 /*
  * Attribute flags.  These should be or-ed together to figure out what
@@ -856,6 +863,10 @@ struct file {
 	struct list_head	f_tfile_llink;
 #endif /* #ifdef CONFIG_EPOLL */
 	struct address_space	*f_mapping;
+
+#ifdef CONFIG_FILE_TABLE_DEBUG
+	struct hlist_node f_hash;
+#endif /* #ifdef CONFIG_FILE_TABLE_DEBUG */
 } __attribute__((aligned(4)));	/* lest something weird decides that 2 is OK */
 
 struct file_handle {
@@ -878,9 +889,9 @@ static inline struct file *get_file(struct file *f)
 /* Page cache limit. The filesystems should put that into their s_maxbytes 
    limits, otherwise bad things can happen in VM. */ 
 #if BITS_PER_LONG==32
-#define MAX_LFS_FILESIZE	(((loff_t)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1) 
+#define MAX_LFS_FILESIZE	((loff_t)ULONG_MAX << PAGE_SHIFT)
 #elif BITS_PER_LONG==64
-#define MAX_LFS_FILESIZE 	((loff_t)0x7fffffffffffffffLL)
+#define MAX_LFS_FILESIZE 	((loff_t)LLONG_MAX)
 #endif
 
 #define FL_POSIX	1
@@ -1162,6 +1173,9 @@ static inline int lease_modify(struct file_lock **before, int arg,
 }
 #endif /* !CONFIG_FILE_LOCKING */
 
+/* sb->s_iflags */
+#define SB_I_CGROUPWB	0x00000001	/* cgroup-aware writeback enabled */
+#define SB_I_NOEXEC	0x00000002	/* Ignore executables on this fs */
 
 struct fasync_struct {
 	spinlock_t		fa_lock;
@@ -1242,6 +1256,7 @@ struct super_block {
 	const struct quotactl_ops	*s_qcop;
 	const struct export_operations *s_export_op;
 	unsigned long		s_flags;
+	unsigned long		s_iflags;	/* internal SB_I_* flags */
 	unsigned long		s_magic;
 	struct dentry		*s_root;
 	struct rw_semaphore	s_umount;
@@ -2618,6 +2633,7 @@ static inline ssize_t blockdev_direct_IO(int rw, struct kiocb *iocb,
 
 void inode_dio_wait(struct inode *inode);
 void inode_dio_done(struct inode *inode);
+struct inode *dio_bio_get_inode(struct bio *bio);
 
 extern void inode_set_flags(struct inode *inode, unsigned int flags,
 			    unsigned int mask);
@@ -2895,5 +2911,7 @@ static inline bool dir_relax(struct inode *inode)
 extern void inode_nohighmem(struct inode *inode);
 int vfs_ioc_setflags_prepare(struct inode *inode, unsigned int oldflags,
 			     unsigned int flags);
+
+extern bool path_noexec(const struct path *path);
 
 #endif /* _LINUX_FS_H */

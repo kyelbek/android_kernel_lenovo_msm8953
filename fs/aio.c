@@ -213,7 +213,12 @@ static struct dentry *aio_mount(struct file_system_type *fs_type,
 	static const struct dentry_operations ops = {
 		.d_dname	= simple_dname,
 	};
-	return mount_pseudo(fs_type, "aio:", NULL, &ops, AIO_RING_MAGIC);
+	struct dentry *root = mount_pseudo(fs_type, "aio:", NULL, &ops,
+					   AIO_RING_MAGIC);
+
+	if (!IS_ERR(root))
+		root->d_sb->s_iflags |= SB_I_NOEXEC;
+	return root;
 }
 
 /* aio_setup
@@ -1370,11 +1375,16 @@ static ssize_t aio_setup_single_vector(struct kiocb *kiocb,
 				       unsigned long *nr_segs,
 				       struct iovec *iovec)
 {
-	if (unlikely(!access_ok(!rw, buf, kiocb->ki_nbytes)))
+	size_t len = kiocb->ki_nbytes;
+
+	if (len > MAX_RW_COUNT)
+		len = MAX_RW_COUNT;
+
+	if (unlikely(!access_ok(!rw, buf, len)))
 		return -EFAULT;
 
 	iovec->iov_base = buf;
-	iovec->iov_len = kiocb->ki_nbytes;
+	iovec->iov_len = len;
 	*nr_segs = 1;
 	return 0;
 }
@@ -1442,6 +1452,7 @@ rw_common:
 			break;
 		}
 
+		get_file(file);
 		if (rw == WRITE)
 			file_start_write(file);
 
@@ -1454,6 +1465,7 @@ rw_common:
 
 		if (rw == WRITE)
 			file_end_write(file);
+		fput(file);
 		break;
 
 	case IOCB_CMD_FDSYNC:
